@@ -1,9 +1,14 @@
 import streamlit as st
 import pandas as pd
+import io
 
 st.set_page_config(page_title="Pharmacy Partnership Analyzer", layout="wide")
 
 st.title("Pharmacy Partnership Analyzer")
+
+# --- Initialize session state for runs ---
+if "runs" not in st.session_state:
+    st.session_state["runs"] = {}
 
 # --- Upload file ---
 uploaded_file = st.file_uploader("Upload your Excel, CSV or Parquet file", type=["csv", "xlsx", "parquet"])
@@ -22,6 +27,36 @@ if uploaded_file:
 
     st.success("File loaded successfully!")
 
+    # --- Filters ---
+    st.header("Filters (optional)")
+    channels = products = []
+    if 'Channel' in df.columns:
+        channels = st.multiselect("Channel", sorted(df['Channel'].unique()))
+    if 'Product_Type' in df.columns:
+        products = st.multiselect("Product_Type", sorted(df['Product_Type'].unique()))
+    if 'Causale' in df.columns:
+        causale = st.multiselect("Causale", sorted(df['Causale'].unique()))
+    if 'Canale' in df.columns:
+        canale = st.multiselect("Canale", sorted(df['Canale'].unique()))
+    if 'Out of Scope \nFilter' in df.columns:
+        scope_filter = st.multiselect("Out of Scope \nFilter", sorted(df['Out of Scope \nFilter'].unique()))
+
+
+    # Apply filters
+    df_filtered = df.copy()
+    if channels:
+        df_filtered = df_filtered[df_filtered['Channel'].isin(channels)]
+    if products:
+        df_filtered = df_filtered[df_filtered['Product_Type'].isin(products)]
+    if causale:
+        df_filtered = df_filtered[df_filtered['Causale'].isin(causale)]
+    if canale:
+        df_filtered = df_filtered[df_filtered['Canale'].isin(canale)]
+    if scope_filter:
+        df_filtered = df_filtered[df_filtered['Out of Scope \nFilter'].isin(scope_filter)]
+
+    st.write(f"Rows used for this run: **{len(df_filtered)}**")
+
     # --- Threshold inputs ---
     st.sidebar.header("Set Revenue Thresholds")
     silver_min = st.sidebar.number_input("Min total revenue for Silver", value=1000)
@@ -30,12 +65,12 @@ if uploaded_file:
     platinum_min = st.sidebar.number_input("Min total revenue for Platinum", value=2000)
 
     # --- Filtering merged pharmacies ---
-    merged_pharmacies = df[
-        (df["Channel"] == "Independent Pharmacies") &
-        (df["Causale"] == "Vendita") &
-        (df["Out of Scope \nFilter"] == "In scope") &
-        (df[" Cluster Check "].isin([" 1.EL ", " 2.L "]))
-        ].copy()
+    merged_pharmacies = df_filtered[
+        (df_filtered["Channel"] == "Independent Pharmacies") &
+        (df_filtered["Causale"] == "Vendita") &
+        (df_filtered["Out of Scope \nFilter"] == "In scope") &
+        (df_filtered[" Cluster Check "].isin([" 1.EL ", " 2.L "]))
+    ].copy()
 
     # --- Revenue calculations ---
     all_pharmacy_revenue = (
@@ -56,9 +91,8 @@ if uploaded_file:
     tier_counts_pivot_use = tier_counts.pivot(index='Cod CRM', columns='tier', values='num_products').fillna(
         0).reset_index()
 
-    threshold_data = all_pharmacy_revenue.merge(tier_counts_pivot_use, on="Cod CRM", how="left").merge(rev_tier23,
-                                                                                                       on="Cod CRM",
-                                                                                                       how="left")
+    threshold_data = all_pharmacy_revenue.merge(tier_counts_pivot_use, on="Cod CRM", how="left").merge(
+        rev_tier23, on="Cod CRM", how="left")
     threshold_data["Tier 2 & 3"] = threshold_data.get("Tier 2", 0) + threshold_data.get("Tier 3", 0)
 
     # --- Assign categories ---
@@ -74,7 +108,6 @@ if uploaded_file:
     all_pharmacy_revenue.loc[
         all_pharmacy_revenue["total_net1rev_imponibile"] >= platinum_min, 'partnership_category'] = "Platinum"
 
-    # make it an ordered Categorical so every later operation keeps Silver→Gold→Platinum
     all_pharmacy_revenue['partnership_category'] = pd.Categorical(
         all_pharmacy_revenue['partnership_category'],
         categories=order,
@@ -91,47 +124,80 @@ if uploaded_file:
         total_revenue=('total_net1rev_imponibile', 'sum')
     ).reset_index()
 
-    # --- Calculating the total values based on partnership group placement ---
+    # Add total row (excluding Unassigned)
     no_unassigned = summary_table.query("partnership_category != 'Unassigned'")
-
-    # Create a one-row DataFrame with sums
     total_row = no_unassigned.agg({
         'num_pharmacies': 'sum',
         'total_revenue': 'sum'
     }).to_frame().T
-
-    # Give it a label for the category column
     total_row['num_pharmacies'] = total_row['num_pharmacies'].astype(int)
     total_row.insert(0, 'partnership_category', 'Total Net 1 Rev Imponibile (ex-Unassigned)')
-
-    # Append to the original table
     summary_table = pd.concat([summary_table, total_row], ignore_index=True)
 
     # --- Display tables ---
     st.subheader("All Pharmacy Revenue")
-    st.dataframe(
-        all_pharmacy_revenue.style.format({"total_net1rev_imponibile": "€{:,.2f}"})
-    )
+    st.dataframe(all_pharmacy_revenue.style.format({"total_net1rev_imponibile": "€{:,.2f}"}))
 
     st.subheader("Category Table (IDs)")
     st.dataframe(category_table_pivot)
 
     st.subheader("Summary Table")
-    st.dataframe(
-        summary_table.style.format({"total_revenue": "€{:,.2f}"})
-    )
+    st.dataframe(summary_table.style.format({"total_revenue": "€{:,.2f}"}))
 
-    # --- Save tables ---
-    # Download buttons instead of writing to disk
-    st.markdown("### Download Results")
-    csv1 = category_table_pivot.to_csv(index=False).encode('utf-8')
-    csv2 = summary_table.to_csv(index=False).encode('utf-8')
+    # --- Save each run in session state ---
+    if st.button("Store this run"):
+        import datetime
+        run_id = f"run_{len(st.session_state['runs']) + 1}"
+        st.session_state['runs'][run_id] = {
+            "timestamp": datetime.datetime.now(),
+            "filters": {"Channel": channels, "Product_Type": products},
+            "thresholds": {"silver_min": silver_min, "gold_min": gold_min, "gold_max": gold_max, "platinum_min": platinum_min},
+            "all_pharmacy_revenue": all_pharmacy_revenue,
+            "category_table_pivot": category_table_pivot,
+            "summary_table": summary_table
+        }
+        st.success(f"Run stored as {run_id}!")
 
-    st.download_button("Download Category IDs CSV",
-                       data=csv1,
-                       file_name="store_categories_ids.csv",
-                       mime="text/csv")
-    st.download_button("Download Summary CSV",
-                       data=csv2,
-                       file_name="store_categories_summary.csv",
-                       mime="text/csv")
+    # --- Display stored runs ---
+    if st.session_state['runs']:
+        st.subheader("Stored Runs")
+        runs_list = []
+        for rid, r in st.session_state['runs'].items():
+            runs_list.append({
+                "run_id": rid,
+                "timestamp": r['timestamp'],
+                "filters": r['filters'],
+                "thresholds": r['thresholds']
+            })
+        runs_df = pd.DataFrame(runs_list)
+        st.dataframe(runs_df)
+
+        # --- Download stored runs ---
+        st.subheader("Download stored runs")
+        export_format = st.selectbox("Choose format", ['parquet', 'excel', 'csv', 'json'])
+
+        if st.button("Generate download file"):
+            buf = io.BytesIO()
+            fname = f"net_revenue_cooper.{export_format}"
+            if export_format == 'parquet':
+                runs_df.to_parquet(buf, index=False)
+            elif export_format == 'excel':
+                runs_df.to_excel(buf, index=False)
+            elif export_format == 'csv':
+                runs_df.to_csv(buf, index=False)
+            elif export_format == 'json':
+                runs_df.to_json(buf, orient='records', date_format='iso')
+            buf.seek(0)
+            st.download_button(
+                label=f"Download runs as {export_format.upper()}",
+                data=buf,
+                file_name=fname,
+                mime="application/octet-stream"
+            )
+    else:
+        st.info("No runs yet. Run a simulation to store runs.")
+
+    # --- Clear stored runs ---
+    if st.button("Clear all stored runs"):
+        st.session_state['runs'] = {}
+        st.success("Cleared stored runs.")
