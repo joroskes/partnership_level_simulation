@@ -61,7 +61,6 @@ if uploaded_file:
     st.sidebar.header("Set Revenue Thresholds")
     silver_min = st.sidebar.number_input("Min total revenue for Silver", value=1000)
     gold_min = st.sidebar.number_input("Min total revenue for Gold", value=1000)
-    gold_max = st.sidebar.number_input("Max total revenue for Gold", value=2000)
     platinum_min = st.sidebar.number_input("Min total revenue for Platinum", value=2000)
 
     # --- Filtering merged pharmacies ---
@@ -102,7 +101,7 @@ if uploaded_file:
         all_pharmacy_revenue["total_net1rev_imponibile"] > silver_min, 'partnership_category'] = "Silver"
     all_pharmacy_revenue.loc[
         (all_pharmacy_revenue["total_net1rev_imponibile"] >= gold_min) &
-        (all_pharmacy_revenue["total_net1rev_imponibile"] < gold_max),
+        (all_pharmacy_revenue["total_net1rev_imponibile"] < platinum_min),
         'partnership_category'
     ] = "Gold"
     all_pharmacy_revenue.loc[
@@ -151,7 +150,7 @@ if uploaded_file:
         st.session_state['runs'][run_id] = {
             "timestamp": datetime.datetime.now(),
             "filters": {"Channel": channels, "Product_Type": products},
-            "thresholds": {"silver_min": silver_min, "gold_min": gold_min, "gold_max": gold_max, "platinum_min": platinum_min},
+            "thresholds": {"silver_min": silver_min, "gold_min": gold_min, "platinum_min": platinum_min},
             "all_pharmacy_revenue": all_pharmacy_revenue,
             "category_table_pivot": category_table_pivot,
             "summary_table": summary_table
@@ -201,3 +200,4 @@ if uploaded_file:
     if st.button("Clear all stored runs"):
         st.session_state['runs'] = {}
         st.success("Cleared stored runs.")
+
