@@ -130,7 +130,7 @@ if uploaded_file:
         'total_revenue': 'sum'
     }).to_frame().T
     total_row['num_pharmacies'] = total_row['num_pharmacies'].astype(int)
-    total_row.insert(0, 'partnership_category', 'Total Net 1 Rev Imponibile (ex-Unassigned)')
+    total_row.insert(0, 'partnership_category', 'Total (ex-Unassigned)')
     summary_table = pd.concat([summary_table, total_row], ignore_index=True)
 
     # --- Display tables ---
@@ -200,4 +200,5 @@ if uploaded_file:
     if st.button("Clear all stored runs"):
         st.session_state['runs'] = {}
         st.success("Cleared stored runs.")
+
 
