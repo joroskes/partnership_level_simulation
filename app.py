@@ -40,6 +40,8 @@ if uploaded_file:
         canale = st.multiselect("Canale", sorted(df['Canale'].unique()))
     if 'Out of Scope \nFilter' in df.columns:
         scope_filter = st.multiselect("Out of Scope \nFilter", sorted(df['Out of Scope \nFilter'].unique()))
+    if 'CLUSTER' in df.columns:
+        cluster = st.multiselect("CLUSTER", sorted(df['CLUSTER'].unique()))
 
 
     # Apply filters
@@ -54,6 +56,8 @@ if uploaded_file:
         df_filtered = df_filtered[df_filtered['Canale'].isin(canale)]
     if scope_filter:
         df_filtered = df_filtered[df_filtered['Out of Scope \nFilter'].isin(scope_filter)]
+    if cluster:
+        df_filtered = df_filtered[df_filtered['CLUSTER'].isin(cluster)]
 
     st.write(f"Rows used for this run: **{len(df_filtered)}**")
 
@@ -63,28 +67,20 @@ if uploaded_file:
     gold_min = st.sidebar.number_input("Min total revenue for Gold", value=1000)
     platinum_min = st.sidebar.number_input("Min total revenue for Platinum", value=2000)
 
-    # --- Filtering merged pharmacies ---
-    merged_pharmacies = df_filtered[
-        (df_filtered["Channel"] == "Independent Pharmacies") &
-        (df_filtered["Causale"] == "Vendita") &
-        (df_filtered["Out of Scope \nFilter"] == "In scope") &
-        (df_filtered[" Cluster Check "].isin([" 1.EL ", " 2.L "]))
-    ].copy()
-
     # --- Revenue calculations ---
     all_pharmacy_revenue = (
-        merged_pharmacies.groupby('Cod CRM', observed=False)['Net Price 1 Revenue (Imponibile)']
+        df_filtered.groupby('Cod CRM', observed=False)['Net Price 1 Revenue (Imponibile)']
         .sum().reset_index(name="total_net1rev_imponibile")
     )
 
     rev_tier23 = (
-        merged_pharmacies[merged_pharmacies["tier"].isin(['Tier 2', 'Tier 3'])]
+        df_filtered[df_filtered["tier"].isin(['Tier 2', 'Tier 3'])]
         .groupby('Cod CRM', observed=False)['Net Price 1 Revenue (Imponibile)']
         .sum().reset_index(name="tier23_net1rev_imponibile")
     )
 
     tier_counts = (
-        merged_pharmacies.groupby(['Cod CRM', 'tier'])['Brand']
+        df_filtered.groupby(['Cod CRM', 'tier'])['Brand']
         .nunique().reset_index(name='num_products')
     )
     tier_counts_pivot_use = tier_counts.pivot(index='Cod CRM', columns='tier', values='num_products').fillna(
@@ -130,7 +126,7 @@ if uploaded_file:
         'total_revenue': 'sum'
     }).to_frame().T
     total_row['num_pharmacies'] = total_row['num_pharmacies'].astype(int)
-    total_row.insert(0, 'partnership_category', 'Total (ex-Unassigned)')
+    total_row.insert(0, 'partnership_category', 'Total Net 1 Rev Imponibile (ex-Unassigned)')
     summary_table = pd.concat([summary_table, total_row], ignore_index=True)
 
     # --- Display tables ---
@@ -200,5 +196,3 @@ if uploaded_file:
     if st.button("Clear all stored runs"):
         st.session_state['runs'] = {}
         st.success("Cleared stored runs.")
-
-
